@@ -28,16 +28,13 @@ def get_cell_coords(img: np.ndarray, pos: tuple[int, int], res: int = 4) -> tupl
 
     return ((start_y, off_y), (start_x, off_x))
 
-def get_cell(img: np.ndarray, pos: tuple[int, int], res: int = 4, logger: Logger = Logger("get_cell")) -> np.ndarray:
-    height, width, _ = img.shape
-    slice_height, slice_width = height // res, width // res
-    start_y, start_x = pos[1] * slice_height, pos[0] * slice_width
-    off_y = start_y + slice_height if start_y + slice_height < height else height
-    off_x = start_x + slice_width if start_x + slice_width < width else width
+def get_cell_coords_by_index(img: np.ndarray, index: int, res: int = 4) -> tuple[tuple[int, int], tuple[int, int]]:
+    y: int = index // res
+    x: int = index % res
 
-    # logger.log(f"Get cell ({pos[0]}, {pos[1]})")
+    r = get_cell_coords(img, (x, y), res=res)
 
-    return img[start_y : off_y, start_x : off_x]
+    return r
 
 def main() -> None:
     config: Config
@@ -57,7 +54,7 @@ def main() -> None:
 
     # Get info about scrambling order of every image
     image_info: list[list[int]] = []
-    for page in range(index, index + 1):
+    for page in range(index, config.last_page_index + 1):
         log(f"Getting info for page {page}...", newline=False)
 
         response = requests.get(f"{head}{mode}{middle}{str(page).zfill(4)}{ext}{tail}",
@@ -78,7 +75,7 @@ def main() -> None:
 
     # Get images and save them locally, keep paths
     image_paths: list[str] = []
-    for page in range(index, index + 1):
+    for page in range(index, config.last_page_index + 1):
         log(f"Getting data for page {page}...", newline=False)
 
         response = requests.get(f"{head}1{middle}{str(page).zfill(4) + '_0000'}.bin{tail}",
@@ -100,22 +97,23 @@ def main() -> None:
     for i, path in enumerate(image_paths):
         log(f"Solving image {path}")
 
-        with Image.open(path) as image:
-            img = np.asarray(image).copy()
+        with Image.open(path) as base_image:
+            img = np.asarray(base_image).copy()
             res = np.zeros(shape=img.shape, dtype='uint8')
 
             for j, cell in enumerate(map(int, image_info[i])):
-                img_c = get_cell_coords(res, (cell // 4, cell % 4))
-                res_c = get_cell_coords(img, (j // 4, j % 4))
+                # Source cell
+                s = get_cell_coords_by_index(img, cell)
 
-                res[res_c[0][0] : res_c[0][1], res_c[1][0] : res_c[1][1]] = \
-                    img[img_c[0][0] : img_c[0][1], img_c[1][0] : img_c[1][1]]
+                # Destination cell
+                d = get_cell_coords_by_index(res, j)
 
-                log(f"{cell:<2} => {j:>2} | {str(img_c):>28} => {str(res_c):<28}")
+                # Copy source cell to destination cell
+                res[d[0][0] : d[0][1], d[1][0] : d[1][1]] = img[s[0][0] : s[0][1], s[1][0] : s[1][1]]
 
-            Image.fromarray(res).show()
+            Image.fromarray(res).save(path.replace("scrambled", "fixed"))
 
-    log("Done")
+    log("Done, fixed images output in ./images/fixed")
 
 if __name__ == "__main__":
     if not os.path.exists('images'):
@@ -126,10 +124,5 @@ if __name__ == "__main__":
 
     if not os.path.exists('images/fixed'):
         os.makedirs('images/fixed')
-
-    img = np.asarray(Image.open("images/scrambled/30.jpeg")).copy()
-    # Image.fromarray(get_cell(arr, (3, 3))).show()
-    res = np.zeros(img.shape, dtype='uint8')
-    # Image.fromarray(res).show()
 
     main()
